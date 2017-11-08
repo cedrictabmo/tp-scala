@@ -1,0 +1,9 @@
+
+
+# All commits by repo
+#curl localhost:9000/repos/vmg/redcarpet/commits
+
+GET    /repos/:user/:repo/commits         controllers.HomeController.getCommits(user: String, repo: String)
+GET    /repos/:user/:repo/languages       controllers.HomeController.getMostLanguagesUsed(user: String, repo: String)
+GET    /repos/:user/:repo/issues          controllers.HomeController.getIssues(user: String, repo: String)
+
