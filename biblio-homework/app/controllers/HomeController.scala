@@ -60,13 +60,13 @@ class HomeController @Inject()(cc: ControllerComponents) extends AbstractControl
 
   // parse le film en json
   def addMovieToMedia = {
-    Action {
+    Action(parse.json) {
       request => {
 
         implicit val movieWrite = Json.writes[Movie]
         implicit val movieReader = Json.reads[Movie]
 
-        val json = request.body.asJson.get
+        val json = request.body
         val mov = json.as[Movie]
 
         //verifie format + contenu
