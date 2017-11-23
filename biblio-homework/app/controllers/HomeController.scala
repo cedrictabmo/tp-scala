@@ -1,13 +1,13 @@
 package controllers
 
+import java.time.{LocalDate, LocalDateTime}
 import javax.inject._
 
-import play.api.mvc._
-import play.api.libs.json
 import play.api.libs.json._
-import play.api.libs.json.Reads._
-import play.api.libs.functional.syntax._
-import sun.security.krb5.KrbException
+import play.api.data.Form
+import play.api.data.Forms._
+import play.api.data.validation.Constraints._
+import play.api.mvc.{AbstractController, ControllerComponents}
 
 /**
   * This controller creates an `Action` to handle HTTP requests to the
@@ -15,76 +15,51 @@ import sun.security.krb5.KrbException
   */
 
 
-case class Movie(title: String,
-                 country: String,
-                 year: Int,
-                 original_title: Option[String],
-                 french_release: Option[String],
-                 synopsis: Option[String],
-                 genre: List[String],
-                 ranking: Option[Int])
-
+case class Movie(title: String, country: String, year: Int, originalTitle: Option[String],
+                 frenchRelease: Option[String], synopsis: Option[String], genre: Seq[String], ranking: Int)
 
 @Singleton
 class HomeController @Inject()(cc: ControllerComponents) extends AbstractController(cc) {
 
-
+  // BD
   var lesFilms = Seq[Movie]()
 
   def existOrNot(mov: Movie): Boolean = {
-
     lesFilms.exists(x => x == mov)
   }
-
 
   // Liste des films
   def mediatek = {
     Action { request =>
-      if (lesFilms.size == 0) Ok("the mediatech is empty ... add some files !") else Ok("Our actual movie list : " + lesFilms.distinct.map(x => x.title + "  ").distinct)
+      if (lesFilms.size == 0) Ok("the mediatech is empty ... add some files !") else Ok("Our actual movie list : " + lesFilms.distinct.map(x => x.title + " \n ").distinct)
     }
   }
 
   //classByGenre
   def classFilmByGenre(genre: String) = {
     Action { request =>
-      var liste = List[String]()
       if (genre.isEmpty) {
-        Ok("Genre no specified, list of all movies : " + lesFilms.map(x => x.title + " "))
+        Ok("Genre not specified, list of all movies : " + lesFilms.map(x => x.title + " "))
       }
-      else { // si genre pareil que autre film on recup le titre sinon non
-        val test = lesFilms.map {
-          x =>
-            x.genre.map {
-              y => if (y.toLowerCase == genre.toLowerCase) liste = liste :+ x.title else ""
-            }
+      else {
+        val filtered = lesFilms.map { x =>
+          x.genre.map(y => if (y.toLowerCase == genre.toLowerCase) x.title else "")
         }
+        Ok("Movie of the same Genre  : " + filtered.flatMap(x => x.distinct.filter(_ != "")) + " \n")
       }
-      Ok("Movie of the same Genre  : " + liste.distinct + " \n")
     }
   }
 
   def countProductionYear(yearDate: Int) = {
     Action {
       request =>
-        var count = 0
-        lesFilms.map(x => if (x.year == yearDate) count += 1)
-        Ok("there is  : " + count + " Movie of the year " + yearDate + " \n")
-    }
-  }
-
-
-  implicit def optionFormat[T: Format]: Format[Option[T]] = new Format[Option[T]] {
-    override def reads(json: JsValue): JsResult[Option[T]] = json.validateOpt[T]
-
-    override def writes(o: Option[T]): JsValue = o match {
-      case Some(t) => implicitly[Writes[T]].writes(t)
-      case None => JsNull
+        val counter = lesFilms.count(x => x.year == yearDate)
+        Ok("there is  : " + counter + " Movie of the year " + yearDate + " \n")
     }
   }
 
   // parse le film en json
   def addMovieToMedia = {
-
     Action {
       request => {
 
@@ -94,56 +69,32 @@ class HomeController @Inject()(cc: ControllerComponents) extends AbstractControl
         val json = request.body.asJson.get
         val mov = json.as[Movie]
 
-        var errorMessage = List[String]()
+        //verifie format + contenu
+        def dateVerif(date : String) : Boolean = date.matches("^(\\d{4})-(0?[1-9]|1[012])-(0?[1-9]|[12][0-9]|3‌​[01])$")
 
-        //title lenght
-        if (mov.title.size > 250) errorMessage = errorMessage :+ "The title must contain 250 characters max "
+        val form = Form(
+          mapping(
+            "title" -> nonEmptyText.verifying(maxLength(250)),
+            "country" -> nonEmptyText,
+            "year" -> number.verifying(min(1899), max(2018)),
+            "original_title" -> optional(text.verifying(maxLength(250))),
+            "french_release" -> optional(text.verifying(dateVerif _)),
+            "synopsis" -> optional(text.verifying(maxLength(1000))),
+            "genres" -> seq(text.verifying(maxLength(50))),
+            "ranking" -> number.verifying(min(0), max(10))
+          )(Movie.apply)(Movie.unapply _)
+        )
 
-        //country lenght
-        if (mov.country.size > 3) errorMessage = errorMessage :+ "The nationality need contain only 3 characters "
+        val boundForm = form.bind(json)
 
-        mov.french_release.getOrElse("") match {
-          case x => {
-            try {
-              val mich = org.joda.time.format.DateTimeFormat.forPattern("yyyy/MM/dd")
-              val ouv = Some(mich.parseDateTime(x))
-            } catch {
-              case e: Exception => None
-                errorMessage = errorMessage :+ "Dateformat must be like yyyy/MM/dd "
-            }
-          }
-        }
-
-
-        if (mov.genre.isEmpty) errorMessage = errorMessage :+ "Genre list is empty, Add at least 1 genre plz "
-        mov.genre.map(x => if (x.size > 50) errorMessage = errorMessage :+ "the lenght of each genre must contain 50 characters max ")
-
-        if (mov.country == "FRA" && mov.original_title.isEmpty) Ok else if (mov.country != "FRA" && mov.original_title.isEmpty) errorMessage = errorMessage :+ "if country != 'FRA', it can't be empty .. "
-        if (mov.original_title.size > 250) errorMessage = errorMessage :+ "The original_title need contain 250 characters max, limit reached "
-
-
-        //ranking range
-        mov.ranking.getOrElse(Ok) match {
-          case x: Int => if (x >= 0 || x <= 10) Ok
-          case Ok => Ok
-          case _ => errorMessage = errorMessage :+ "The ranking need to be between 0 and 10 with entier value"
-        }
-
-        val bool = existOrNot(mov)
-        if (bool == false) {
-          if (errorMessage.isEmpty) {
-            lesFilms = lesFilms :+ mov;
-          }
-        } else errorMessage = errorMessage :+ "there is already a movie with this name sorry "
-        if (errorMessage.isEmpty) Ok("Ajout du film suivant : " + mov + " \n") else BadRequest("Le film : " + mov.title + " n'a pas pu être ajouté, voici la liste des erreurs : " + errorMessage.map(x => x).distinct + " \n")
-
+        if (existOrNot(mov) == false) {
+          if (boundForm.errors.isEmpty) {
+            lesFilms = lesFilms :+ mov
+            Ok("Add of : " + mov + " to the mediatech \n")
+          } else BadRequest("The movie : " + mov.title + " can't be add, Errors : " + boundForm.errors.map(x => x.message.toString + " \n"))
+        } else BadRequest("Sorry but The movie : " + mov.title + " Already exist \n")
       }
     }
   }
-
-  def index() = Action { implicit request: Request[AnyContent] =>
-    Ok(views.html.index())
-  }
 }
-
 
